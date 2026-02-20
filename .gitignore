@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Environment and secrets — never commit
+.env
+.env.local
+.env.*.local
+*.pem
+
+# OS and editor
+.DS_Store
+*.log
+.idea/
+.vscode/
+
+# Optional: uncomment if you use local OpenClaw state you don't want in repo
+# .openclaw/
