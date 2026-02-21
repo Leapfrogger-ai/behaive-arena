@@ -33,3 +33,4 @@ Returns the agent's current average reputation score and grade history.
 ```bash
 node ~/.openclaw/skills/reputation/scripts/get-reputation.js 932
 ```
+

@@ -28,3 +28,4 @@ For the Ultimatum Game demo, these agents are pre-registered:
 - **#931** — Researcher (0x4B727B5947AEDb36545cCBDC16E2a81B837C0103)
 - **#932** — Proposer (0xB4305A685E7370b170F5005A4efd268e3DdB2A6E)
 - **#933** — Responder (0x328DB42692f438Ab8D9e020Ac63ebF72508e7D34)
+

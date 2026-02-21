@@ -6,6 +6,7 @@ node_modules/
 .env.local
 .env.*.local
 *.pem
+config/openclaw.json
 
 # OS and editor
 .DS_Store

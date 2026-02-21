@@ -48,3 +48,4 @@ The script outputs JSON with the transaction hash and Base Sepolia explorer link
 - USDC uses 6 decimal places
 - Always check ETH balance before sending (need gas)
 - The Proposer agent should use PROPOSER_PRIVATE_KEY environment variable
+

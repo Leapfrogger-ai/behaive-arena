@@ -1,0 +1,128 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.2.19-2"
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "anthropic/claude-haiku-4-5"
+      },
+      "models": {
+        "anthropic/claude-haiku-4-5": {
+          "params": {
+            "cacheRetention": "short"
+          }
+        }
+      },
+      "contextPruning": {
+        "mode": "cache-ttl",
+        "ttl": "1h"
+      },
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "heartbeat": {
+        "every": "30m"
+      },
+      "maxConcurrent": 4,
+      "subagents": {
+        "maxConcurrent": 8
+      }
+    },
+    "list": [
+      {
+        "id": "researcher",
+        "name": "Researcher",
+        "workspace": "/home/daytona/.openclaw/workspace-researcher"
+      },
+      {
+        "id": "proposer",
+        "name": "Proposer",
+        "workspace": "/home/daytona/.openclaw/workspace-proposer"
+      },
+      {
+        "id": "responder",
+        "name": "Responder",
+        "workspace": "/home/daytona/.openclaw/workspace-responder"
+      }
+    ]
+  },
+  "bindings": [
+    {
+      "agentId": "researcher",
+      "match": {
+        "channel": "telegram",
+        "accountId": "researcher"
+      }
+    },
+    {
+      "agentId": "proposer",
+      "match": {
+        "channel": "telegram",
+        "accountId": "proposer"
+      }
+    },
+    {
+      "agentId": "responder",
+      "match": {
+        "channel": "telegram",
+        "accountId": "responder"
+      }
+    }
+  ],
+  "messages": {
+    "ackReactionScope": "group-mentions"
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto",
+    "restart": true
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "dmPolicy": "pairing",
+      "groups": {
+        "YOUR_TELEGRAM_GROUP_ID": {
+          "requireMention": false
+        }
+      },
+      "groupPolicy": "allowlist",
+      "streamMode": "partial",
+      "accounts": {
+        "researcher": {
+          "dmPolicy": "pairing",
+          "botToken": "YOUR_RESEARCHER_BOT_TOKEN",
+          "streamMode": "partial",
+          "groupPolicy": "open"
+        },
+        "proposer": {
+          "dmPolicy": "pairing",
+          "botToken": "YOUR_PROPOSER_BOT_TOKEN",
+          "streamMode": "partial",
+          "groupPolicy": "open"
+        },
+        "responder": {
+          "dmPolicy": "pairing",
+          "botToken": "YOUR_RESPONDER_BOT_TOKEN",
+          "streamMode": "partial",
+          "groupPolicy": "open"
+        }
+      }
+    }
+  },
+  "gateway": {
+    "mode": "local",
+    "auth": {
+      "mode": "token",
+      "token": "YOUR_GATEWAY_AUTH_TOKEN"
+    }
+  },
+  "plugins": {
+    "entries": {
+      "telegram": {
+        "enabled": true
+      }
+    }
+  }
+}

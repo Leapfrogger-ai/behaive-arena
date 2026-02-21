@@ -256,7 +256,8 @@ async function main() {
   console.log(`  Use Daytona dashboard or API to exec: cat /tmp/openclaw-gateway.log`);
   console.log("");
   console.log("To stop the sandbox later:");
-  console.log(`  curl -X POST "${DAYTONA_URL}/sandboxes/${sandboxId}/stop" -H "Authorization: Bearer ${DAYTONA_KEY}"`);
+  console.log(`  curl -X POST "${DAYTONA_URL}/sandboxes/${sandboxId}/stop" -H "Authorization: Bearer <DAYTONA_API_KEY>"`);
+  console.log("  (use DAYTONA_API_KEY from your .env)");
 }
 
 main().catch(err => {

@@ -34,3 +34,4 @@ console.log(JSON.stringify({
   totalGrades: data.grades.length,
   recentGrades: data.grades.slice(-5)
 }));
+
