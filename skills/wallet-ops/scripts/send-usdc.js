@@ -5,15 +5,32 @@ const RPC = process.env.BASE_SEPOLIA_RPC || "https://sepolia.base.org";
 const USDC = process.env.USDC_CONTRACT || "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
 const PRIVATE_KEY = process.env.WALLET_PRIVATE_KEY;
 
-const recipient = process.argv[2];
+const rawRecipient = process.argv[2];
 const amount = process.argv[3];
 
 if (!PRIVATE_KEY) {
   console.log(JSON.stringify({ error: "WALLET_PRIVATE_KEY environment variable required" }));
   process.exit(1);
 }
-if (!recipient || !amount) {
+if (!rawRecipient || !amount) {
   console.log(JSON.stringify({ error: "Usage: WALLET_PRIVATE_KEY=<key> send-usdc.js <recipient> <amount>" }));
+  process.exit(1);
+}
+
+// Validate + checksum the recipient address. ethers.getAddress throws on
+// malformed input and on bad checksums for mixed-case addresses — catching
+// typos and mismatched-case attacks before we send funds.
+let recipient;
+try {
+  recipient = ethers.getAddress(rawRecipient);
+} catch (e) {
+  console.log(JSON.stringify({ error: `Invalid recipient address: ${e.message}` }));
+  process.exit(1);
+}
+
+// Refuse numeric-string or negative amounts that ethers would otherwise accept.
+if (!/^\d+(\.\d+)?$/.test(amount)) {
+  console.log(JSON.stringify({ error: `Invalid amount: ${amount}` }));
   process.exit(1);
 }
 

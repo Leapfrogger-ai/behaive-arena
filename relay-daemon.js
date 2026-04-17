@@ -12,7 +12,8 @@ const fs = require("fs");
 const path = require("path");
 const http = require("http");
 const https = require("https");
-const { execSync } = require("child_process");
+const { execFileSync } = require("child_process");
+const crypto = require("crypto");
 
 // === Config (set via environment) ===
 const OPENCLAW = process.env.OPENCLAW_PATH || "/home/daytona/.npm-global/bin/openclaw";
@@ -24,6 +25,9 @@ const POLL_INTERVAL = 2500; // ms
 
 // Webhook URL for UI/structured payloads (optional; no default to avoid committing endpoints)
 const WEBHOOK_URL = process.env.WEBHOOK_URL || "";
+// Optional HMAC shared secret — receiver verifies X-Webhook-Signature to
+// reject spoofed requests. Emitted only when set.
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "";
 
 // Agent metadata for webhook payloads
 const AGENT_META = {
@@ -322,6 +326,16 @@ function webhookPost(agentId, text, gameEvent) {
   if (!WEBHOOK_URL) return;
   const payload = JSON.stringify(buildWebhookPayload(agentId, text, gameEvent));
 
+  const headers = {
+    "Content-Type": "application/json",
+    "Content-Length": Buffer.byteLength(payload),
+  };
+  if (WEBHOOK_SECRET) {
+    const sig = crypto.createHmac("sha256", WEBHOOK_SECRET).update(payload).digest("hex");
+    headers["X-Webhook-Signature"] = `sha256=${sig}`;
+    headers["X-Webhook-Timestamp"] = Date.now().toString();
+  }
+
   try {
     const url = new URL(WEBHOOK_URL);
     const transport = url.protocol === "https:" ? https : http;
@@ -330,7 +344,7 @@ function webhookPost(agentId, text, gameEvent) {
       port: url.port || (url.protocol === "https:" ? 443 : 80),
       path: url.pathname + url.search,
       method: "POST",
-      headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) },
+      headers,
       timeout: 5000,
     }, (res) => {
       res.resume();
@@ -460,21 +474,39 @@ function triggerAgent(agentId, message, replyAccount, fromAgent) {
       msg = msg.substring(0, 3500) + "\n[message truncated]";
     }
 
-    // Write message to temp file to avoid shell escaping issues
-    const tmpFile = `/tmp/relay-msg-${agentId}-${Date.now()}.txt`;
-    fs.writeFileSync(tmpFile, msg);
+    // Defense in depth: agentId and replyAccount originate from internal
+    // triggerAgent() call sites, but validate anyway against a known allow-list
+    // so a future code path can't smuggle shell metacharacters in.
+    if (!/^[a-z][a-z0-9_-]{0,63}$/.test(agentId)) {
+      throw new Error(`invalid agentId: ${agentId}`);
+    }
+    if (!/^[a-z][a-z0-9_-]{0,63}$/.test(replyAccount)) {
+      throw new Error(`invalid replyAccount: ${replyAccount}`);
+    }
 
-    const cmd = `${OPENCLAW} agent --agent ${agentId} --message "$(cat ${tmpFile})" --deliver --reply-channel telegram --reply-to "${GROUP_ID}" --reply-account ${replyAccount} --timeout 120 --json`;
-
-    const result = execSync(cmd, {
-      timeout: 130000,
-      encoding: "utf8",
-      stdio: ["pipe", "pipe", "pipe"],
-      shell: "/bin/bash",
-    });
-
-    // Clean up temp file
-    try { fs.unlinkSync(tmpFile); } catch(e) {}
+    // execFileSync with an args array bypasses the shell entirely — no
+    // interpolation, no $(...) substitution, no metacharacter risk. That also
+    // means we can pass the message directly as an argument and drop the
+    // predictable /tmp file that the previous string-cmd approach required.
+    const result = execFileSync(
+      OPENCLAW,
+      [
+        "agent",
+        "--agent", agentId,
+        "--message", msg,
+        "--deliver",
+        "--reply-channel", "telegram",
+        "--reply-to", GROUP_ID,
+        "--reply-account", replyAccount,
+        "--timeout", "120",
+        "--json",
+      ],
+      {
+        timeout: 130000,
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "pipe"],
+      }
+    );
 
     // Parse result and send to webhook
     try {
