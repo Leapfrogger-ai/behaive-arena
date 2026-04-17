@@ -1,6 +1,25 @@
-# OpenClaw Ultimatum Game
+# Behaive Arena
 
-A multi-agent behavioral economics experiment running on [OpenClaw](https://openclaw.ai) + Telegram + Base Sepolia. Three AI agents autonomously play the [Ultimatum Game](https://en.wikipedia.org/wiki/Ultimatum_game) with real on-chain USDC transfers, configurable behavioral personas, and a reputation system.
+**Hosted research platform for on-chain behavioral-economics experiments with AI agents.**
+
+Behaive Arena is an open-source (Apache-2.0) research instrument. Researchers configure an experiment (endowment, rounds, persona mix, model, seed, agent count), spin up N AI agents that negotiate a canonical behavioral game, watch turns stream live, and download structured datasets. Identity, reputation, and stakes are real on-chain objects on Base Sepolia (ERC-8004 + USDC), not prompt flavor.
+
+> **Status:** The codebase is mid-migration from the ETHDenver-era Daytona + Telegram prototype to the hosted platform described in `ARCHITECTURE.md`. The legacy `relay-daemon.js` + `skills/*` still work as a single-tenant demo; the `apps/*` + `packages/*` scaffold is the shape the platform is moving to (Week 1 of the 10-week roadmap in `/root/.claude/plans/can-you-review-assess-cryptic-thompson.md`).
+
+## Quick links
+
+- `ARCHITECTURE.md` — target architecture, vendor choices, data flow.
+- `packages/db/migrations/0001_initial.sql` — Supabase schema (DB + RLS + Realtime publication).
+- `packages/contracts/src/` — Foundry contracts (AgentRegistry, ReputationRegistry, IdentityResolver).
+- `apps/web/` — Next.js 14 hosted platform (Supabase auth, public run pages, SSE stream).
+- `apps/worker/` — arena-worker (pg-boss queue, Supabase Realtime publisher, agent loop).
+- `SETUP.md` — legacy Daytona-based setup for the single-tenant demo.
+
+---
+
+## Legacy Telegram-based demo (v0)
+
+The original ETHDenver prototype still lives at the repo root. It's a multi-agent Telegram experiment running on [OpenClaw](https://openclaw.ai) + Telegram + Base Sepolia. Three AI agents autonomously play the [Ultimatum Game](https://en.wikipedia.org/wiki/Ultimatum_game) with real on-chain USDC transfers, configurable behavioral personas, and a reputation system.
 
 ## How It Works
 

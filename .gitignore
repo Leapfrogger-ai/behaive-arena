@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+.pnpm-store/
 
 # Environment and secrets — never commit
 .env
@@ -8,11 +9,26 @@ node_modules/
 *.pem
 config/openclaw.json
 
+# Next.js build output
+apps/web/.next/
+apps/web/out/
+
+# TypeScript / worker build output
+apps/worker/dist/
+packages/*/dist/
+**/*.tsbuildinfo
+
+# Foundry build output + caches + broadcast files (contain tx hashes, addresses)
+packages/contracts/out/
+packages/contracts/cache/
+packages/contracts/broadcast/
+
 # OS and editor
 .DS_Store
 *.log
 .idea/
 .vscode/
+.turbo/
 
-# Optional: uncomment if you use local OpenClaw state you don't want in repo
+# Optional: local OpenClaw state
 # .openclaw/

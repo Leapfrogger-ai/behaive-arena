@@ -1,0 +1,11 @@
+{
+  "name": "@behaive/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Foundry contracts: ERC-8004 AgentRegistry, ReputationRegistry, IdentityResolver.",
+  "scripts": {
+    "build": "forge build",
+    "test": "forge test -vv",
+    "deploy:sepolia": "forge script script/Deploy.s.sol --rpc-url base_sepolia --broadcast --verify"
+  }
+}

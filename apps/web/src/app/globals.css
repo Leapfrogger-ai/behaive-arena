@@ -1,0 +1,11 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; background: #0b0d12; color: #e6e8ee; }
+a { color: #7ab8ff; }
+main { max-width: 880px; margin: 0 auto; padding: 32px 20px; }
+.muted { color: #8a93a5; }
+.card { background: #151922; border: 1px solid #242a37; border-radius: 12px; padding: 20px; margin: 12px 0; }
+.role { text-transform: uppercase; font-size: 11px; letter-spacing: 0.1em; padding: 2px 8px; border-radius: 999px; background: #242a37; display: inline-block; margin-right: 8px; }
+.role.researcher { background: #1d3a5f; color: #a9ccff; }
+.role.proposer { background: #3a2a5f; color: #cbb6ff; }
+.role.responder { background: #5f2a3a; color: #ffb6cb; }
+pre { background: #0f1218; padding: 12px; border-radius: 8px; overflow-x: auto; }
