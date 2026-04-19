@@ -17,8 +17,28 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-// Supabase stores auth users under the auth schema; we don't mirror it —
-// we just reference auth.users.id as an untyped uuid fk.
+export const users = pgTable("users", {
+  id: uuid("id").primaryKey().default(sql`uuid_generate_v4()`),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash"),
+  displayName: text("display_name"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: uuid("id").primaryKey().default(sql`uuid_generate_v4()`),
+    userId: uuid("user_id").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index("sessions_user_idx").on(t.userId),
+    expiresIdx: index("sessions_expires_idx").on(t.expiresAt),
+  }),
+);
 
 export const orgRole = pgEnum("org_role", ["owner", "admin", "member"]);
 export const runStatus = pgEnum("run_status", [
@@ -47,6 +67,7 @@ export const provider = pgEnum("provider", [
   "anthropic",
   "openai",
   "google",
+  "mock",
   "custom",
 ]);
 

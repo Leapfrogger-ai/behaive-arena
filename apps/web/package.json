@@ -12,10 +12,10 @@
   "dependencies": {
     "@behaive/chain": "workspace:*",
     "@behaive/db": "workspace:*",
-    "@supabase/ssr": "^0.5.2",
-    "@supabase/supabase-js": "^2.46.0",
+    "drizzle-orm": "^0.36.4",
     "next": "14.2.15",
     "pg-boss": "^10.1.5",
+    "postgres": "^3.4.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zod": "^3.23.8"

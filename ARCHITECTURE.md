@@ -1,93 +1,88 @@
 # Architecture
 
-The hosted Behaive Arena platform is a two-vendor, zero-monthly-cost stack designed for a research audience (behavioral econ / AI alignment labs, ETH Foundation grants, crypto-AI pre-seed VCs).
+The hosted Behaive Arena platform is a **sovereign, zero-external-service** stack: vanilla Postgres, local Ethereum (Foundry/anvil for dev, Base Sepolia for staging), and a Next.js + Node worker pair. Nothing the project depends on is proprietary, and every service runs on a commodity Linux box. An earlier draft targeted Supabase; the vanilla-Postgres rewrite is the one in the tree.
 
 ## Stack
 
 | Concern | Tool | Notes |
 |---|---|---|
-| Compute (web + worker) | **Daytona** sandboxes | Using existing $200 credit + 5 GB storage. Persistent sandboxes with public URLs; fallback to Oracle Always Free if this underperforms. |
-| DB + Auth + Storage + Realtime + Vault | **Supabase** free tier | 500 MB DB, 50K MAU auth, 1 GB storage, Realtime channels, pgsodium Vault. |
-| Blockchain RPC | **Alchemy** free | 300M compute units/mo for Base Sepolia. |
-| Contracts | **Foundry** (local) | AgentRegistry, ReputationRegistry, IdentityResolver. |
-| Queue | **pg-boss** | Postgres-backed; no Redis needed. |
-| Live stream | Supabase Realtime + SSE fallback | Browser subscribes directly; server-side SSE for clients that can't open a websocket. |
-| BYO model keys | Supabase **Vault (pgsodium)** | Envelope encryption. Plaintext never touches the DB. |
+| Database | **Postgres 16** | Schema + `LISTEN/NOTIFY` triggers + cookie sessions. Zero extensions required beyond `pgcrypto` + `uuid-ossp`. |
+| Compute (web + worker) | Node 22 on **Daytona** sandboxes / Oracle Always Free | Web: Next.js dev server. Worker: long-running tsx / compiled dist. |
+| Blockchain RPC | **Alchemy** (Base Sepolia staging) / **anvil** (local dev) | Chain id env-selectable in `packages/chain/src/client.ts`. |
+| Contracts | **Foundry** + solc 0.8.27 | AgentRegistry, ReputationRegistry, IdentityResolver, MockUSDC (dev only). |
+| Queue | **pg-boss** | Postgres-backed; no Redis. |
+| Live stream | Postgres `pg_notify` + Next.js Route Handler SSE | Each message insert fires `pg_notify('run:<id>', …)`; SSE subscribes via a dedicated connection per client. |
+| Auth | Cookie sessions (`public.sessions` + HMAC token hash) | Dev auto-login in place; magic-link / OIDC lands in W6. |
+| BYO model keys (W7) | libsodium sealed boxes | Schema exists; crypto path is TODO. |
 
-Why not Vercel / Fly.io / Neon / Clerk / Upstash / AWS KMS? See the vendor audit in `/root/.claude/plans/can-you-review-assess-cryptic-thompson.md` §4. TL;DR: Vercel Hobby forbids commercial use, Fly.io removed its free tier for new signups, and consolidating on Supabase collapses 4 vendors into 1 at the same zero cost.
+## Monorepo
+
+```
+apps/
+  web/                    # Next.js 14 — public /run/[slug], SSE fan-out, home page, dev auth
+  worker/                 # arena-worker — pg-boss consumer + run-game orchestrator + personas
+packages/
+  contracts/              # Foundry: AgentRegistry, ReputationRegistry, IdentityResolver, MockUSDC
+  chain/                  # viem helpers: USDC transfer, EIP-712 signFeedback, registry writes
+  db/                     # Drizzle schema, migration SQL, shared pg/drizzle/listener helpers
+```
 
 ## Topology
 
 ```
 Researcher browser
-  ↓ Supabase Auth (magic link)
-Next.js 14 on Daytona sandbox ─── SSE /api/runs/:id/stream ─┐
-  ↓ Route Handlers                                          │
-Supabase Postgres ◀── LISTEN/NOTIFY ── Supabase Realtime ───┤
-  ↑  (pg-boss queue, Vault, Storage for transcripts)        │
-  │
-arena-worker on Daytona sandbox (long-running)
-  ↓
-Base Sepolia via Alchemy ─► AgentRegistry / ReputationRegistry / USDC
-Provider SDKs (Anthropic / OpenAI / Gemini) — BYO keys decrypted from Vault per run
-Optional Telegram mirror (outbound webhook only)
-```
-
-## Monorepo layout
-
-```
-apps/
-  web/                    # Next.js 14, Supabase Auth, public /run/[slug]
-  worker/                 # arena-worker (pg-boss), fake-runner for W1 validation
-packages/
-  contracts/              # Foundry: AgentRegistry, ReputationRegistry, IdentityResolver
-  chain/                  # viem helpers (USDC, registries, EIP-712 sign helpers)
-  db/                     # Drizzle schema + migrations (Supabase-ready SQL)
+  ↓ Next.js app (/run/[slug])
+  │     ↕ /api/runs/[id]/stream  — SSE, LAST-EVENT-ID aware
+Next.js route handler on Daytona
+  ↓ drizzle + postgres.js
+Postgres 16
+  ↕ pg_notify('run:<id>', payload)      ← emitted by messages/runs triggers
+arena-worker on Daytona sandbox
+  ↓ pg-boss → runGame(runId)
+  ↓ viem
+Base Sepolia / anvil ─► AgentRegistry / ReputationRegistry / (Mock)USDC
+Provider SDKs (W7) — Anthropic / OpenAI / Gemini
 ```
 
 ## Data model
 
-All tenant tables sit under a `org` FK and carry an RLS policy gated on `public.is_org_member(org_id)`. Public run pages (visibility `public`/`unlisted`) add an additional anon-readable policy on `runs` + children so `/run/[slug]` doesn't require a session.
+Every tenant table references `public.users.id` directly (no Supabase `auth.*`). Tenancy is enforced in the application layer via a `SET LOCAL app.user_id = '…'` GUC set from the session cookie; the `public.is_org_member()` helper reads that GUC. Public-run access is an explicit visibility enum check, not an RLS policy.
 
-Hot path tables:
-- `runs` — one per experiment execution. Frozen `config_snapshot` is the reproducibility anchor.
-- `messages` — every agent turn, with `event_type` (`offer` / `response` / `verdict` / `chat` / `game_start`) and optional structured `payload`. Realtime publication is enabled; the browser subscribes to `INSERT` events filtered by `run_id`.
-- `reputation_events` — Postgres read cache; the source of truth is the on-chain event log emitted by `ReputationRegistry`.
-- `byo_keys` — ciphertext only. Plaintext lives only inside the worker's RAM for the duration of a single run.
+Hot path:
+- `runs` — one per execution. `config_snapshot` is the frozen reproducibility anchor.
+- `messages` — every turn, event-typed. INSERT trigger emits `pg_notify('run:<id>', payload)` with a 4 KB snippet + structured fields. Hand-offs stay under Postgres's 8 KB `NOTIFY` cap even with long utterances.
+- `reputation_events` — read cache of on-chain `FeedbackSubmitted` events.
 
 ## Contracts
 
-- **AgentRegistry** — `registerAgent(metadataHash) → agentId`. Monotonic ids, wallet-scoped.
-- **ReputationRegistry** — platform-signer pattern: agents sign EIP-712 `Feedback` inner payloads; one hot platform relay calls `submitFeedbackBatch`. Agents never touch gas.
-- **IdentityResolver** — view-only convenience (`agentId → (wallet, metadataHash)`), kept separate so the read surface can evolve (Merkle metadata roots, etc.) without touching the canonical registry.
+- **AgentRegistry** — `registerAgent(metadataHash) → agentId`, wallet-scoped.
+- **ReputationRegistry** — platform-signer pattern. Each round each party signs an EIP-712 `Feedback`. The platform signer submits `submitFeedbackBatch` once per run. Nonces protect against replay; scores range -100..100.
+- **IdentityResolver** — view-only (`agentId → (wallet, metadataHash)`), so alternative read strategies (Merkle roots, etc.) can be added without touching the canonical registry.
+- **MockUSDC** — dev only, open mint. Real runs against Base Sepolia use Circle's `0x036CbD53842c5426634e7929541eC2318f3dCF7e`.
+
+## Live observability
+
+The SSE route (`apps/web/src/app/api/runs/[id]/stream/route.ts`) spins up one dedicated Postgres connection per subscriber, LISTENs to the run's channel, and forwards every notification as an SSE event keyed by the message id. On reconnect the client reads `Last-Event-ID` (or `?since=N`) and the route replays missed rows from `messages` before re-subscribing — so there's no gap even across proxy drops.
 
 ## Running locally
 
+See [E2E.md](./E2E.md) for the full reproducible bootstrap. TL;DR:
+
 ```bash
-# One-time
-pnpm install
-cp .env.example .env && $EDITOR .env   # fill in Supabase + Alchemy
-
-# Apply schema
-psql "$SUPABASE_DB_URL" -f packages/db/migrations/0001_initial.sql
-psql "$SUPABASE_DB_URL" -f packages/db/migrations/0002_seed_demo.sql
-
-# Contracts (requires Foundry: https://book.getfoundry.sh/)
-cd packages/contracts && forge install foundry-rs/forge-std && forge test
-
-# Web + worker
-pnpm --filter @behaive/web dev       # :3000
-pnpm --filter @behaive/worker dev
-
-# Fake runner to validate the SSE / Realtime path
-pnpm --filter @behaive/worker fake-run
+sudo pg_ctlcluster 16 main start
+psql -f packages/db/migrations/0001_initial.sql behaive_arena
+/root/.foundry/bin/anvil &
+forge script script/Deploy.s.sol --rpc-url http://127.0.0.1:8545 --broadcast
+pnpm install && pnpm --filter @behaive/web dev
+pnpm --filter @behaive/worker run-game
 ```
+
+Open `http://127.0.0.1:3000/run/<slug>` and watch the arena run live.
 
 ## Trade-offs accepted
 
-- **Supabase 7-day inactivity pause** — a GitHub Actions cron hits `/api/healthz` every 3 days to keep the free-tier project warm.
-- **Supabase 500 MB DB** — completed-run transcripts snapshot to Supabase Storage; `messages` hot table purges old runs on a cadence.
-- **Daytona as long-running host** — Daytona is primarily an AI-sandbox product; long-running + public URLs work today, but a fallback to Oracle Always Free is planned if stability falls short past the $200 credit.
-- **No Redis** — pub/sub rides Postgres `LISTEN/NOTIFY` + Supabase Realtime. Acceptable at 3–10 concurrent runs; revisit if load grows.
+- **No RLS on hot tables** — multi-tenant isolation is enforced in the query layer. Simpler to reason about and avoids the tenant-leak class of RLS-policy bugs; the cost is that the worker must bypass tenancy explicitly when it legitimately has to, which is already the case.
+- **Persona-driven mock model as the default** — until BYO model keys land in W7, runs use deterministic persona logic. This is a feature for the methodology-paper's reproducibility narrative: every persona run can be re-executed bit-for-bit from the stored seed, while the Anthropic / OpenAI integration in W7 swaps in a stochastic-but-versioned model on top of the same orchestrator.
+- **Base Sepolia + anvil, no mainnet** — research substrate, not a trading venue. Gas is irrelevant; testnet faucet throttling is the only real operational worry.
 
-See `/root/.claude/plans/can-you-review-assess-cryptic-thompson.md` for the full 10-week roadmap, vendor audit, and risk register.
+See `/root/.claude/plans/can-you-review-assess-cryptic-thompson.md` for the full 10-week roadmap.

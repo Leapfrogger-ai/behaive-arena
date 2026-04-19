@@ -1,6 +1,6 @@
 import { formatUnits, getAddress, parseUnits, type Address, type Hash } from "viem";
-import { erc20Abi } from "./abi.js";
-import { publicClient, walletClient } from "./client.js";
+import { erc20Abi } from "./abi";
+import { publicClient, walletClient } from "./client";
 
 // Circle USDC on Base Sepolia (84532). Canonical testnet address.
 export const USDC_BASE_SEPOLIA: Address = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";

@@ -1,82 +1,93 @@
+import { asc, eq, gt } from "drizzle-orm";
 import { NextResponse, type NextRequest } from "next/server";
-import { createSupabaseAnon } from "@/lib/supabase/server";
+import { schema } from "@behaive/db";
+import { db, listener } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Server-Sent Events fallback for clients that can't open a Supabase
-// Realtime websocket. Streams the same INSERTs via Postgres LISTEN/NOTIFY
-// mediated by Supabase Realtime over a long-lived fetch on the server.
-//
-// Reconnection: honors the Last-Event-ID header — the event id is the
-// message primary key, so the client can pick up where it left off.
+// SSE stream backed by Postgres LISTEN/NOTIFY. Each subscriber opens a
+// dedicated Postgres connection (listener()) and subscribes to the
+// `run:<id>` channel the migration's insert trigger notifies on. Any
+// messages written to the DB after the caller's ?since=<id> are replayed
+// in order so reconnects don't drop history.
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
-  const sb = createSupabaseAnon();
-  const { data: run } = await sb
-    .from("runs")
-    .select("id, visibility")
-    .eq("id", params.id)
-    .in("visibility", ["public", "unlisted"])
-    .maybeSingle();
-  if (!run) {
-    return NextResponse.json({ error: "not found" }, { status: 404 });
+  const [run] = await db()
+    .select({ id: schema.runs.id, visibility: schema.runs.visibility })
+    .from(schema.runs)
+    .where(eq(schema.runs.id, params.id));
+
+  if (!run) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (run.visibility !== "public" && run.visibility !== "unlisted") {
+    return NextResponse.json({ error: "private" }, { status: 403 });
   }
 
-  const lastEventId = Number(req.headers.get("last-event-id") ?? "0");
+  const since = Number(
+    req.nextUrl.searchParams.get("since") ?? req.headers.get("last-event-id") ?? "0",
+  );
 
   const encoder = new TextEncoder();
+  const channel = `run:${params.id}`;
+  const sub = listener();
+
   const stream = new ReadableStream({
     async start(controller) {
-      const send = (payload: { id: number; event: string; data: unknown }) => {
+      let closed = false;
+      const send = (id: number | string, event: string, data: unknown) => {
+        if (closed) return;
         const line =
-          `id: ${payload.id}\n` +
-          `event: ${payload.event}\n` +
-          `data: ${JSON.stringify(payload.data)}\n\n`;
+          `id: ${id}\n` + `event: ${event}\n` + `data: ${typeof data === "string" ? data : JSON.stringify(data)}\n\n`;
         controller.enqueue(encoder.encode(line));
       };
 
-      // Replay any messages newer than the client's Last-Event-ID so a
-      // reconnection fills the gap without depending on the realtime buffer.
-      const { data: backlog } = await sb
-        .from("messages")
-        .select("id, round_number, agent_role, from_agent, content, event_type, payload, created_at")
-        .eq("run_id", params.id)
-        .gt("id", lastEventId)
-        .order("id", { ascending: true })
+      // Replay any rows the client hasn't seen yet.
+      const backlog = await db()
+        .select()
+        .from(schema.messages)
+        .where(and(eq(schema.messages.runId, params.id), gt(schema.messages.id, BigInt(Number.isFinite(since) ? since : 0))))
+        .orderBy(asc(schema.messages.id))
         .limit(500);
-      for (const m of backlog ?? []) {
-        send({ id: Number(m.id), event: m.event_type ?? "message", data: m });
+      for (const m of backlog) {
+        send(Number(m.id), m.eventType ?? "message", {
+          id: Number(m.id),
+          run_id: m.runId,
+          round_number: m.roundNumber,
+          agent_role: m.agentRole,
+          from_agent: m.fromAgent,
+          content: m.content,
+          event_type: m.eventType,
+          payload: m.payload,
+          created_at: m.createdAt.toISOString(),
+        });
       }
 
-      const channel = sb
-        .channel(`sse:run:${params.id}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "INSERT",
-            schema: "public",
-            table: "messages",
-            filter: `run_id=eq.${params.id}`,
-          },
-          (payload) => {
-            const m = payload.new as {
-              id: number;
-              event_type: string;
-              [k: string]: unknown;
-            };
-            send({ id: m.id, event: m.event_type ?? "message", data: m });
-          },
-        )
-        .subscribe();
+      await sub.listen(channel, (payload) => {
+        try {
+          const parsed = JSON.parse(payload) as {
+            id: number | string;
+            event_type?: string;
+          };
+          send(parsed.id, parsed.event_type ?? "message", parsed);
+        } catch {
+          send("raw", "message", payload);
+        }
+      });
 
-      // Keepalive comment every 15s so proxies don't drop the connection.
+      // Keepalive — SSE proxies drop silent connections after ~60s.
       const ping = setInterval(() => {
+        if (closed) return;
         controller.enqueue(encoder.encode(": ping\n\n"));
       }, 15_000);
 
-      req.signal.addEventListener("abort", () => {
+      req.signal.addEventListener("abort", async () => {
+        if (closed) return;
+        closed = true;
         clearInterval(ping);
-        sb.removeChannel(channel);
+        try {
+          await sub.end({ timeout: 1 });
+        } catch {
+          /* ignore */
+        }
         controller.close();
       });
     },
@@ -90,3 +101,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     },
   });
 }
+
+// Tiny helper — Drizzle's `and` is only imported where needed, so we keep
+// it local to this module to avoid a circular import.
+import { and } from "drizzle-orm";

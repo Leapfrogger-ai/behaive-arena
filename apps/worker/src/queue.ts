@@ -1,5 +1,5 @@
 import PgBoss from "pg-boss";
-import { logger } from "./logger.js";
+import { logger } from "./logger";
 
 export const RUN_QUEUE = "arena.run";
 

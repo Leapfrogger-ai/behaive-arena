@@ -9,8 +9,8 @@ import {
   type Hex,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { agentRegistryAbi, reputationRegistryAbi } from "./abi.js";
-import { publicClient, walletClient, CHAIN } from "./client.js";
+import { agentRegistryAbi, reputationRegistryAbi } from "./abi";
+import { publicClient, walletClient, CHAIN } from "./client";
 
 export interface FeedbackInput {
   fromAgentId: bigint;

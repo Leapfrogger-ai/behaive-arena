@@ -32,3 +32,5 @@ packages/contracts/broadcast/
 
 # Optional: local OpenClaw state
 # .openclaw/
+# Foundry libs pulled from GitHub — we don't vendor these
+packages/contracts/lib/

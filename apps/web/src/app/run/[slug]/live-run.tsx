@@ -1,9 +1,8 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getSupabaseBrowser } from "@/lib/supabase/client";
 
 interface Message {
-  id: number | string;
+  id: number;
   round_number: number | null;
   agent_role: "researcher" | "proposer" | "responder";
   from_agent: string;
@@ -20,56 +19,72 @@ export function LiveRun(props: {
 }) {
   const [messages, setMessages] = useState<Message[]>(props.initialMessages);
   const [status, setStatus] = useState(props.initialStatus);
-  const seen = useRef(new Set<string>(props.initialMessages.map((m) => String(m.id))));
+  const seen = useRef(new Set<number>(props.initialMessages.map((m) => m.id)));
 
   useEffect(() => {
-    const sb = getSupabaseBrowser();
-    const channel = sb
-      .channel(`run:${props.runId}`)
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages", filter: `run_id=eq.${props.runId}` },
-        (payload) => {
-          const msg = payload.new as Message;
-          const key = String(msg.id);
-          if (seen.current.has(key)) return;
-          seen.current.add(key);
-          setMessages((cur) => [...cur, msg]);
-        },
-      )
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "runs", filter: `id=eq.${props.runId}` },
-        (payload) => {
-          const next = payload.new as { status: string };
-          setStatus(next.status);
-        },
-      )
-      .subscribe();
+    const lastSeen = props.initialMessages.reduce((m, cur) => Math.max(m, cur.id), 0);
+    const src = new EventSource(`/api/runs/${props.runId}/stream?since=${lastSeen}`);
 
-    return () => {
-      sb.removeChannel(channel);
+    const handleMessage = (ev: MessageEvent<string>) => {
+      let msg: Message;
+      try {
+        msg = JSON.parse(ev.data) as Message;
+      } catch {
+        return;
+      }
+      if (seen.current.has(msg.id)) return;
+      seen.current.add(msg.id);
+      setMessages((cur) => [...cur, msg]);
     };
-  }, [props.runId]);
+    const handleStatus = (ev: MessageEvent<string>) => {
+      try {
+        const parsed = JSON.parse(ev.data) as { content: string };
+        setStatus(parsed.content);
+      } catch {
+        /* no-op */
+      }
+    };
+
+    src.addEventListener("message", handleMessage);
+    src.addEventListener("game_start", handleMessage);
+    src.addEventListener("offer", handleMessage);
+    src.addEventListener("response", handleMessage);
+    src.addEventListener("transfer", handleMessage);
+    src.addEventListener("verdict", handleMessage);
+    src.addEventListener("grade", handleMessage);
+    src.addEventListener("registered", handleMessage);
+    src.addEventListener("funded", handleMessage);
+    src.addEventListener("reputation_confirmed", handleMessage);
+    src.addEventListener("run_complete", handleMessage);
+    src.addEventListener("run_status", handleStatus);
+    src.addEventListener("chat", handleMessage);
+
+    return () => src.close();
+  }, [props.runId, props.initialMessages]);
 
   const byRound = useMemo(() => {
-    return messages.reduce<Record<string, Message[]>>((acc, m) => {
-      const key = m.round_number != null ? `Round ${m.round_number}` : "Setup";
-      (acc[key] ??= []).push(m);
-      return acc;
-    }, {});
+    const acc = new Map<string, Message[]>();
+    for (const m of messages) {
+      const key = m.round_number != null ? `Round ${m.round_number}` : "Setup / results";
+      if (!acc.has(key)) acc.set(key, []);
+      acc.get(key)!.push(m);
+    }
+    return acc;
   }, [messages]);
 
   return (
     <section>
       <p className="muted">live status: {status}</p>
-      {Object.entries(byRound).map(([label, list]) => (
+      {Array.from(byRound.entries()).map(([label, list]) => (
         <div key={label} className="card">
           <h3>{label}</h3>
           {list.map((m) => (
-            <div key={String(m.id)} style={{ marginBottom: 8 }}>
+            <div key={m.id} style={{ marginBottom: 8 }}>
               <span className={`role ${m.agent_role}`}>{m.agent_role}</span>
-              <span>{m.content}</span>
+              <span>
+                <strong style={{ opacity: 0.7, marginRight: 8 }}>{m.event_type}</strong>
+                {m.content}
+              </span>
             </div>
           ))}
         </div>
